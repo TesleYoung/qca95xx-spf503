@@ -1,0 +1,443 @@
+--- a/drivers/net/wireless/ath/wil6210/main.c
++++ b/drivers/net/wireless/ath/wil6210/main.c
+@@ -154,7 +154,7 @@ __acquires(&sta->tid_rx_lock) __releases(&sta->tid_rx_lock)
+ 
+ 	if (sta->status != wil_sta_unused) {
+ 		if (!from_event)
+-			wmi_disconnect_sta(wil, sta->addr, reason_code);
++			wmi_disconnect_sta(wil, sta->addr, reason_code, true);
+ 
+ 		switch (wdev->iftype) {
+ 		case NL80211_IFTYPE_AP:
+@@ -194,8 +194,8 @@ static void _wil6210_disconnect(struct wil6210_priv *wil, const u8 *bssid,
+ 	struct wireless_dev *wdev = wil->wdev;
+ 
+ 	might_sleep();
+-	wil_dbg_misc(wil, "%s(bssid=%pM, reason=%d, ev%s)\n", __func__, bssid,
+-		     reason_code, from_event ? "+" : "-");
++	wil_info(wil, "%s(bssid=%pM, reason=%d, ev%s)\n", __func__, bssid,
++		 reason_code, from_event ? "+" : "-");
+ 
+ 	/* Cases are:
+ 	 * - disconnect single STA, still connected
+@@ -257,13 +257,16 @@ static void wil_disconnect_worker(struct work_struct *work)
+ static void wil_connect_timer_fn(ulong x)
+ {
+ 	struct wil6210_priv *wil = (void *)x;
++	bool q;
+ 
+-	wil_dbg_misc(wil, "Connect timeout\n");
++	wil_err(wil, "Connect timeout detected, disconnect station\n");
+ 
+ 	/* reschedule to thread context - disconnect won't
+-	 * run from atomic context
++	 * run from atomic context.
++	 * queue on wmi_wq to prevent race with connect event.
+ 	 */
+-	schedule_work(&wil->disconnect_worker);
++	q = queue_work(wil->wmi_wq, &wil->disconnect_worker);
++	wil_dbg_wmi(wil, "queue_work of disconnect_worker -> %d\n", q);
+ }
+ 
+ static void wil_scan_timer_fn(ulong x)
+@@ -384,6 +387,32 @@ static int wil_find_free_vring(struct wil6210_priv *wil)
+ 	return -EINVAL;
+ }
+ 
++int wil_tx_init(struct wil6210_priv *wil, int cid)
++{
++	int rc = -EINVAL, ringid;
++
++	if (cid < 0) {
++		wil_err(wil, "No connection pending\n");
++		goto out;
++	}
++	ringid = wil_find_free_vring(wil);
++	if (ringid < 0) {
++		wil_err(wil, "No free vring found\n");
++		goto out;
++	}
++
++	wil_dbg_wmi(wil, "Configure for connection CID %d vring %d\n",
++		    cid, ringid);
++
++	rc = wil_vring_init_tx(wil, ringid, 1 << tx_ring_order, cid, 0);
++	if (rc)
++		wil_err(wil, "wil_vring_init_tx for CID %d vring %d failed\n",
++			cid, ringid);
++
++out:
++	return rc;
++}
++
+ int wil_bcast_init(struct wil6210_priv *wil)
+ {
+ 	int ri = wil->bcast_vring, rc;
+@@ -414,41 +443,6 @@ void wil_bcast_fini(struct wil6210_priv *wil)
+ 	wil_vring_fini_tx(wil, ri);
+ }
+ 
+-static void wil_connect_worker(struct work_struct *work)
+-{
+-	int rc, cid, ringid;
+-	struct wil6210_priv *wil = container_of(work, struct wil6210_priv,
+-						connect_worker);
+-	struct net_device *ndev = wil_to_ndev(wil);
+-
+-	mutex_lock(&wil->mutex);
+-
+-	cid = wil->pending_connect_cid;
+-	if (cid < 0) {
+-		wil_err(wil, "No connection pending\n");
+-		goto out;
+-	}
+-	ringid = wil_find_free_vring(wil);
+-	if (ringid < 0) {
+-		wil_err(wil, "No free vring found\n");
+-		goto out;
+-	}
+-
+-	wil_dbg_wmi(wil, "Configure for connection CID %d vring %d\n",
+-		    cid, ringid);
+-
+-	rc = wil_vring_init_tx(wil, ringid, 1 << tx_ring_order, cid, 0);
+-	wil->pending_connect_cid = -1;
+-	if (rc == 0) {
+-		wil->sta[cid].status = wil_sta_connected;
+-		netif_tx_wake_all_queues(ndev);
+-	} else {
+-		wil_disconnect_cid(wil, cid, WLAN_REASON_UNSPECIFIED, true);
+-	}
+-out:
+-	mutex_unlock(&wil->mutex);
+-}
+-
+ int wil_priv_init(struct wil6210_priv *wil)
+ {
+ 	uint i;
+@@ -468,12 +462,10 @@ int wil_priv_init(struct wil6210_priv *wil)
+ 	init_completion(&wil->wmi_ready);
+ 	init_completion(&wil->wmi_call);
+ 
+-	wil->pending_connect_cid = -1;
+ 	wil->bcast_vring = -1;
+ 	setup_timer(&wil->connect_timer, wil_connect_timer_fn, (ulong)wil);
+ 	setup_timer(&wil->scan_timer, wil_scan_timer_fn, (ulong)wil);
+ 
+-	INIT_WORK(&wil->connect_worker, wil_connect_worker);
+ 	INIT_WORK(&wil->disconnect_worker, wil_disconnect_worker);
+ 	INIT_WORK(&wil->wmi_event_worker, wmi_event_worker);
+ 	INIT_WORK(&wil->fw_error_worker, wil_fw_error_worker);
+@@ -864,7 +856,6 @@ int wil_reset(struct wil6210_priv *wil, bool load_fw)
+ 	}
+ 
+ 	/* init after reset */
+-	wil->pending_connect_cid = -1;
+ 	wil->ap_isolate = 0;
+ 	reinit_completion(&wil->wmi_ready);
+ 	reinit_completion(&wil->wmi_call);
+
+--- a/drivers/net/wireless/ath/wil6210/txrx.c
++++ b/drivers/net/wireless/ath/wil6210/txrx.c
+@@ -804,6 +804,9 @@ int wil_vring_init_tx(struct wil6210_priv *wil, int id, int size,
+ 	txdata->dot1x_open = false;
+ 	txdata->enabled = 0;
+ 	wil_vring_free(wil, vring, 1);
++	wil->vring2cid_tid[id][0] = WIL6210_MAX_CID;
++	wil->vring2cid_tid[id][1] = 0;
++
+  out:
+ 
+ 	return rc;
+
+--- a/drivers/net/wireless/ath/wil6210/wil6210.h
++++ b/drivers/net/wireless/ath/wil6210/wil6210.h
+@@ -579,12 +579,10 @@ struct wil6210_priv {
+ 	struct workqueue_struct *wmi_wq; /* for deferred calls */
+ 	struct work_struct wmi_event_worker;
+ 	struct workqueue_struct *wq_service;
+-	struct work_struct connect_worker;
+ 	struct work_struct disconnect_worker;
+ 	struct work_struct fw_error_worker;	/* for FW error recovery */
+ 	struct timer_list connect_timer;
+ 	struct timer_list scan_timer; /* detect scan timeout */
+-	int pending_connect_cid;
+ 	struct list_head pending_wmi_ev;
+ 	/*
+ 	 * protect pending_wmi_ev
+@@ -734,7 +732,8 @@ int wmi_rx_chain_add(struct wil6210_priv *wil, struct vring *vring);
+ int wmi_p2p_cfg(struct wil6210_priv *wil, int channel);
+ int wmi_rxon(struct wil6210_priv *wil, bool on);
+ int wmi_get_temperature(struct wil6210_priv *wil, u32 *t_m, u32 *t_r);
+-int wmi_disconnect_sta(struct wil6210_priv *wil, const u8 *mac, u16 reason);
++int wmi_disconnect_sta(struct wil6210_priv *wil, const u8 *mac, u16 reason,
++		       bool full_disconnect);
+ int wmi_addba(struct wil6210_priv *wil, u8 ringid, u8 size, u16 timeout);
+ int wmi_delba_tx(struct wil6210_priv *wil, u8 ringid, u16 reason);
+ int wmi_delba_rx(struct wil6210_priv *wil, u8 cidxtid, u16 reason);
+@@ -785,6 +784,7 @@ void wil_rx_fini(struct wil6210_priv *wil);
+ int wil_vring_init_tx(struct wil6210_priv *wil, int id, int size,
+ 		      int cid, int tid);
+ void wil_vring_fini_tx(struct wil6210_priv *wil, int id);
++int wil_tx_init(struct wil6210_priv *wil, int cid);
+ int wil_vring_init_bcast(struct wil6210_priv *wil, int id, int size);
+ int wil_bcast_init(struct wil6210_priv *wil);
+ void wil_bcast_fini(struct wil6210_priv *wil);
+
+--- a/drivers/net/wireless/ath/wil6210/wmi.c
++++ b/drivers/net/wireless/ath/wil6210/wmi.c
+@@ -415,6 +415,7 @@ static void wmi_evt_connect(struct wil6210_priv *wil, int id, void *d, int len)
+ 	const size_t assoc_req_ie_offset = sizeof(u16) * 2;
+ 	/* capinfo(u16) + status_code(u16) + associd(u16) + IEs */
+ 	const size_t assoc_resp_ie_offset = sizeof(u16) * 3;
++	int rc;
+ 
+ 	if (len < sizeof(*evt)) {
+ 		wil_err(wil, "Connect event too short : %d bytes\n", len);
+@@ -434,8 +435,8 @@ static void wmi_evt_connect(struct wil6210_priv *wil, int id, void *d, int len)
+ 	}
+ 
+ 	ch = evt->channel + 1;
+-	wil_dbg_wmi(wil, "Connect %pM channel [%d] cid %d\n",
+-		    evt->bssid, ch, evt->cid);
++	wil_info(wil, "Connect %pM channel [%d] cid %d\n",
++		 evt->bssid, ch, evt->cid);
+ 	wil_hex_dump_wmi("connect AI : ", DUMP_PREFIX_OFFSET, 16, 1,
+ 			 evt->assoc_info, len - sizeof(*evt), true);
+ 
+@@ -457,20 +458,67 @@ static void wmi_evt_connect(struct wil6210_priv *wil, int id, void *d, int len)
+ 		assoc_resp_ielen = 0;
+ 	}
+ 
++	mutex_lock(&wil->mutex);
++	if (test_bit(wil_status_resetting, wil->status) ||
++	    !test_bit(wil_status_fwready, wil->status)) {
++		wil_err(wil, "status_resetting, cancel connect event, CID %d\n",
++			evt->cid);
++		mutex_unlock(&wil->mutex);
++		/* no need for cleanup, wil_reset will do that */
++		return;
++	}
++
+ 	if ((wdev->iftype == NL80211_IFTYPE_STATION) ||
+ 	    (wdev->iftype == NL80211_IFTYPE_P2P_CLIENT)) {
+ 		if (!test_bit(wil_status_fwconnecting, wil->status)) {
+ 			wil_err(wil, "Not in connecting state\n");
++			mutex_unlock(&wil->mutex);
+ 			return;
+ 		}
+ 		del_timer_sync(&wil->connect_timer);
+-		cfg80211_connect_result(ndev, evt->bssid,
+-					assoc_req_ie, assoc_req_ielen,
+-					assoc_resp_ie, assoc_resp_ielen,
+-					WLAN_STATUS_SUCCESS, GFP_KERNEL);
++	}
++
++	/* FIXME FW can transmit only ucast frames to peer */
++	/* FIXME real ring_id instead of hard coded 0 */
++	ether_addr_copy(wil->sta[evt->cid].addr, evt->bssid);
++	wil->sta[evt->cid].status = wil_sta_conn_pending;
+ 
++	rc = wil_tx_init(wil, evt->cid);
++	if (rc) {
++		wil_err(wil, "%s: config tx vring failed for CID %d, rc (%d)\n",
++			__func__, evt->cid, rc);
++		wmi_disconnect_sta(wil, wil->sta[evt->cid].addr,
++				   WLAN_REASON_UNSPECIFIED, false);
++	} else {
++		wil_info(wil, "%s: successful connection to CID %d\n",
++			__func__, evt->cid);
++	}
++
++	if ((wdev->iftype == NL80211_IFTYPE_STATION) ||
++	    (wdev->iftype == NL80211_IFTYPE_P2P_CLIENT)) {
++		if (rc) {
++			netif_tx_stop_all_queues(ndev);
++			netif_carrier_off(ndev);
++			wil_err(wil,
++				"%s: cfg80211_connect_result with failure\n",
++				__func__);
++			cfg80211_connect_result(ndev, evt->bssid, NULL, 0,
++						NULL, 0,
++						WLAN_STATUS_UNSPECIFIED_FAILURE,
++						GFP_KERNEL);
++			goto out;
++		} else {
++			cfg80211_connect_result(ndev, evt->bssid,
++						assoc_req_ie, assoc_req_ielen,
++						assoc_resp_ie, assoc_resp_ielen,
++						WLAN_STATUS_SUCCESS,
++						GFP_KERNEL);
++		}
+ 	} else if ((wdev->iftype == NL80211_IFTYPE_AP) ||
+ 		   (wdev->iftype == NL80211_IFTYPE_P2P_GO)) {
++		if (rc)
++			goto out;
++
+ 		memset(&sinfo, 0, sizeof(sinfo));
+ 
+ 		sinfo.generation = wil->sinfo_gen++;
+@@ -481,17 +529,21 @@ static void wmi_evt_connect(struct wil6210_priv *wil, int id, void *d, int len)
+ 		}
+ 
+ 		cfg80211_new_sta(ndev, evt->bssid, &sinfo, GFP_KERNEL);
++	} else {
++		wil_err(wil, "%s: unhandled iftype %d for CID %d\n",
++			__func__, wdev->iftype, evt->cid);
++		goto out;
+ 	}
+-	clear_bit(wil_status_fwconnecting, wil->status);
+-	set_bit(wil_status_fwconnected, wil->status);
+ 
+-	/* FIXME FW can transmit only ucast frames to peer */
+-	/* FIXME real ring_id instead of hard coded 0 */
+-	ether_addr_copy(wil->sta[evt->cid].addr, evt->bssid);
+-	wil->sta[evt->cid].status = wil_sta_conn_pending;
++	wil->sta[evt->cid].status = wil_sta_connected;
++	set_bit(wil_status_fwconnected, wil->status);
++	netif_tx_wake_all_queues(ndev);
+ 
+-	wil->pending_connect_cid = evt->cid;
+-	queue_work(wil->wq_service, &wil->connect_worker);
++out:
++	if (rc)
++		wil->sta[evt->cid].status = wil_sta_unused;
++	clear_bit(wil_status_fwconnecting, wil->status);
++	mutex_unlock(&wil->mutex);
+ }
+ 
+ static void wmi_evt_disconnect(struct wil6210_priv *wil, int id,
+@@ -500,7 +552,7 @@ static void wmi_evt_disconnect(struct wil6210_priv *wil, int id,
+ 	struct wmi_disconnect_event *evt = d;
+ 	u16 reason_code = le16_to_cpu(evt->protocol_reason_status);
+ 
+-	wil_dbg_wmi(wil, "Disconnect %pM reason [proto %d wmi %d]\n",
++	wil_info(wil, "Disconnect %pM reason [proto %d wmi %d]\n",
+ 		    evt->bssid, reason_code, evt->disconnect_reason);
+ 
+ 	wil->sinfo_gen++;
+@@ -706,6 +758,7 @@ void wmi_recv_cmd(struct wil6210_priv *wil)
+ 	void __iomem *src;
+ 	ulong flags;
+ 	unsigned n;
++	unsigned int num_immed_reply = 0;
+ 
+ 	if (!test_bit(wil_status_reset_done, wil->status)) {
+ 		wil_err(wil, "Reset in progress. Cannot handle WMI event\n");
+@@ -715,6 +768,7 @@ void wmi_recv_cmd(struct wil6210_priv *wil)
+ 	for (n = 0;; n++) {
+ 		u16 len;
+ 		bool q;
++		bool immed_reply = false;
+ 
+ 		r->head = ioread32(wil->csr + HOST_MBOX +
+ 				   offsetof(struct wil6210_mbox_ctl, rx.head));
+@@ -763,6 +817,13 @@ void wmi_recv_cmd(struct wil6210_priv *wil)
+ 			struct wil6210_mbox_hdr_wmi *wmi = &evt->event.wmi;
+ 			u16 id = le16_to_cpu(wmi->id);
+ 			u32 tstamp = le32_to_cpu(wmi->timestamp);
++			if (wil->reply_id && wil->reply_id == id) {
++				if (wil->reply_buf) {
++					memcpy(wil->reply_buf, wmi,
++					       min(len, wil->reply_size));
++					immed_reply = true;
++				}
++			}
+ 
+ 			wil_dbg_wmi(wil, "WMI event 0x%04x MID %d @%d msec\n",
+ 				    id, wmi->mid, tstamp);
+@@ -778,15 +839,24 @@ void wmi_recv_cmd(struct wil6210_priv *wil)
+ 		iowrite32(r->tail, wil->csr + HOST_MBOX +
+ 			  offsetof(struct wil6210_mbox_ctl, rx.tail));
+ 
+-		/* add to the pending list */
+-		spin_lock_irqsave(&wil->wmi_ev_lock, flags);
+-		list_add_tail(&evt->list, &wil->pending_wmi_ev);
+-		spin_unlock_irqrestore(&wil->wmi_ev_lock, flags);
+-		q = queue_work(wil->wmi_wq, &wil->wmi_event_worker);
+-		wil_dbg_wmi(wil, "queue_work -> %d\n", q);
++		if (immed_reply) {
++			wil_dbg_wmi(wil, "%s: Complete WMI 0x%04x\n",
++				    __func__, wil->reply_id);
++			kfree(evt);
++			num_immed_reply++;
++			complete(&wil->wmi_call);
++		} else {
++			/* add to the pending list */
++			spin_lock_irqsave(&wil->wmi_ev_lock, flags);
++			list_add_tail(&evt->list, &wil->pending_wmi_ev);
++			spin_unlock_irqrestore(&wil->wmi_ev_lock, flags);
++			q = queue_work(wil->wmi_wq, &wil->wmi_event_worker);
++			wil_dbg_wmi(wil, "queue_work -> %d\n", q);
++		}
+ 	}
+ 	/* normally, 1 event per IRQ should be processed */
+-	wil_dbg_wmi(wil, "%s -> %d events queued\n", __func__, n);
++	wil_dbg_wmi(wil, "%s -> %d events queued, %d completed\n", __func__,
++		    n-num_immed_reply, num_immed_reply);
+ }
+ 
+ int wmi_call(struct wil6210_priv *wil, u16 cmdid, void *buf, u16 len,
+@@ -1148,7 +1218,8 @@ int wmi_get_temperature(struct wil6210_priv *wil, u32 *t_bb, u32 *t_rf)
+ 	return 0;
+ }
+ 
+-int wmi_disconnect_sta(struct wil6210_priv *wil, const u8 *mac, u16 reason)
++int wmi_disconnect_sta(struct wil6210_priv *wil, const u8 *mac, u16 reason,
++		       bool full_disconnect)
+ {
+ 	int rc;
+ 	u16 reason_code;
+@@ -1172,19 +1243,20 @@ int wmi_disconnect_sta(struct wil6210_priv *wil, const u8 *mac, u16 reason)
+ 		return rc;
+ 	}
+ 
+-	/* call event handler manually after processing wmi_call,
+-	 * to avoid deadlock - disconnect event handler acquires wil->mutex
+-	 * while it is already held here
+-	 */
+-	reason_code = le16_to_cpu(reply.evt.protocol_reason_status);
+-
+-	wil_dbg_wmi(wil, "Disconnect %pM reason [proto %d wmi %d]\n",
+-		    reply.evt.bssid, reason_code,
+-		    reply.evt.disconnect_reason);
++	if (full_disconnect) {
++		/* call event handler manually after processing wmi_call,
++		 * to avoid deadlock - disconnect event handler acquires
++		 * wil->mutex while it is already held here
++		 */
++		reason_code = le16_to_cpu(reply.evt.protocol_reason_status);
+ 
+-	wil->sinfo_gen++;
+-	wil6210_disconnect(wil, reply.evt.bssid, reason_code, true);
++		wil_dbg_wmi(wil, "Disconnect %pM reason [proto %d wmi %d]\n",
++			    reply.evt.bssid, reason_code,
++			    reply.evt.disconnect_reason);
+ 
++		wil->sinfo_gen++;
++		wil6210_disconnect(wil, reply.evt.bssid, reason_code, true);
++	}
+ 	return 0;
+ }
+ 
+@@ -1312,14 +1384,11 @@ static void wmi_event_handle(struct wil6210_priv *wil,
+ 			    id, wil->reply_id);
+ 		/* check if someone waits for this event */
+ 		if (wil->reply_id && wil->reply_id == id) {
+-			if (wil->reply_buf) {
+-				memcpy(wil->reply_buf, wmi,
+-				       min(len, wil->reply_size));
+-			} else {
+-				wmi_evt_call_handler(wil, id, evt_data,
+-						     len - sizeof(*wmi));
+-			}
+-			wil_dbg_wmi(wil, "Complete WMI 0x%04x\n", id);
++			WARN_ON(wil->reply_buf);
++			wmi_evt_call_handler(wil, id, evt_data,
++					     len - sizeof(*wmi));
++			wil_dbg_wmi(wil, "%s: Complete WMI 0x%04x\n",
++				    __func__, id);
+ 			complete(&wil->wmi_call);
+ 			return;
+ 		}
+

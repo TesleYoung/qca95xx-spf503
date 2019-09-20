@@ -1,0 +1,35 @@
+--- a/drivers/net/wireless/ath/wil6210/main.c
++++ b/drivers/net/wireless/ath/wil6210/main.c
+@@ -795,6 +795,8 @@ int wil_reset(struct wil6210_priv *wil, bool load_fw)
+ 		return 0;
+ 	}
+ 
++	set_bit(wil_status_resetting, wil->status);
++
+ 	cancel_work_sync(&wil->disconnect_worker);
+ 	wil6210_disconnect(wil, NULL, WLAN_REASON_DEAUTH_LEAVING, false);
+ 	wil_bcast_fini(wil);
+@@ -886,6 +888,12 @@ int wil_reset(struct wil6210_priv *wil, bool load_fw)
+ void wil_fw_error_recovery(struct wil6210_priv *wil)
+ {
+ 	wil_dbg_misc(wil, "starting fw error recovery\n");
++
++	if (test_bit(wil_status_resetting, wil->status)) {
++		wil_info(wil, "Reset already in progress\n");
++		return;
++	}
++
+ 	wil->recovery_state = fw_recovery_pending;
+ 	schedule_work(&wil->fw_error_worker);
+ }
+--- a/drivers/net/wireless/ath/wil6210/wil6210.h
++++ b/drivers/net/wireless/ath/wil6210/wil6210.h
+@@ -411,6 +411,7 @@ enum { /* for wil6210_priv.status */
+ 	wil_status_reset_done,
+ 	wil_status_irqen, /* FIXME: interrupts enabled - for debug */
+ 	wil_status_napi_en, /* NAPI enabled protected by wil->mutex */
++	wil_status_resetting, /* reset in progress */
+ 	wil_status_last /* keep last */
+ };
+ 
+

@@ -1,0 +1,13 @@
+diff --git a/mcproxy/Makefile b/mcproxy/Makefile
+index 90f1d87..4423a92 100644
+--- a/mcproxy/Makefile
++++ b/mcproxy/Makefile
+@@ -13,7 +13,7 @@ override CFLAGS        += -pipe -O2 -Wall -W -I.
+ override CXXFLAGS      += $(CFLAGS) -std=c++0x
+ #CC		      = g++-4.6
+ LFLAGS        = -Wl,-O1
+-LIBS          = -lstdc++ -lpthread
++LIBS          = -lstdc++ -pthread
+ DEL_FILE      = rm -f
+ 
+ ####### Files

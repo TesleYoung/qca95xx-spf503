@@ -1,0 +1,100 @@
+--- a/drivers/net/wireless/ath/wil6210/debugfs.c
++++ b/drivers/net/wireless/ath/wil6210/debugfs.c
+@@ -1390,6 +1390,11 @@ __acquires(&p->tid_rx_lock) __releases(&p->tid_rx_lock)
+ 				}
+ 			}
+ 			spin_unlock_bh(&p->tid_rx_lock);
++			seq_printf(s,
++				   "Rx invalid frame: non-data %lu, short %lu, large %lu\n",
++				   p->stats.rx_non_data_frame,
++				   p->stats.rx_short_frame,
++				   p->stats.rx_large_frame);
+ 		}
+ 	}
+ 
+--- a/drivers/net/wireless/ath/wil6210/txrx.c
++++ b/drivers/net/wireless/ath/wil6210/txrx.c
+@@ -383,14 +383,16 @@ static struct sk_buff *wil_vring_reap_rx(struct wil6210_priv *wil,
+ 	u16 dmalen;
+ 	u8 ftype;
+ 	int cid;
+-	int i = (int)vring->swhead;
++	int i;
+ 	struct wil_net_stats *stats;
+ 
+ 	BUILD_BUG_ON(sizeof(struct vring_rx_desc) > sizeof(skb->cb));
+ 
++again:
+ 	if (unlikely(wil_vring_is_empty(vring)))
+ 		return NULL;
+ 
++	i = (int)vring->swhead;
+ 	_d = &vring->va[i].rx;
+ 	if (unlikely(!(_d->dma.status & RX_DMA_STATUS_DU))) {
+ 		/* it is not error, we just reached end of Rx done area */
+@@ -402,7 +404,7 @@ static struct sk_buff *wil_vring_reap_rx(struct wil6210_priv *wil,
+ 	wil_vring_advance_head(vring, 1);
+ 	if (!skb) {
+ 		wil_err(wil, "No Rx skb at [%d]\n", i);
+-		return NULL;
++		goto again;
+ 	}
+ 	d = wil_skb_rxdesc(skb);
+ 	*d = *_d;
+@@ -416,10 +418,14 @@ static struct sk_buff *wil_vring_reap_rx(struct wil6210_priv *wil,
+ 	wil_hex_dump_txrx("Rx ", DUMP_PREFIX_NONE, 32, 4,
+ 			  (const void *)d, sizeof(*d), false);
+ 
++	cid = wil_rxdesc_cid(d);
++	stats = &wil->sta[cid].stats;
++
+ 	if (unlikely(dmalen > sz)) {
+ 		wil_err(wil, "Rx size too large: %d bytes!\n", dmalen);
++		stats->rx_large_frame++;
+ 		kfree_skb(skb);
+-		return NULL;
++		goto again;
+ 	}
+ 	skb_trim(skb, dmalen);
+ 
+@@ -428,8 +434,6 @@ static struct sk_buff *wil_vring_reap_rx(struct wil6210_priv *wil,
+ 	wil_hex_dump_txrx("Rx ", DUMP_PREFIX_OFFSET, 16, 1,
+ 			  skb->data, skb_headlen(skb), false);
+ 
+-	cid = wil_rxdesc_cid(d);
+-	stats = &wil->sta[cid].stats;
+ 	stats->last_mcs_rx = wil_rxdesc_mcs(d);
+ 
+ 	/* use radiotap header only if required */
+@@ -448,15 +452,17 @@ static struct sk_buff *wil_vring_reap_rx(struct wil6210_priv *wil,
+ 	if (unlikely(ftype != IEEE80211_FTYPE_DATA)) {
+ 		wil_dbg_txrx(wil, "Non-data frame ftype 0x%08x\n", ftype);
+ 		/* TODO: process it */
++		stats->rx_non_data_frame++;
+ 		kfree_skb(skb);
+-		return NULL;
++		goto again;
+ 	}
+ 
+ 	if (unlikely(skb->len < ETH_HLEN + snaplen)) {
+ 		wil_err(wil, "Short frame, len = %d\n", skb->len);
+ 		/* TODO: process it (i.e. BAR) */
++		stats->rx_short_frame++;
+ 		kfree_skb(skb);
+-		return NULL;
++		goto again;
+ 	}
+ 
+ 	/* L4 IDENT is on when HW calculated checksum, check status
+--- a/drivers/net/wireless/ath/wil6210/wil6210.h
++++ b/drivers/net/wireless/ath/wil6210/wil6210.h
+@@ -466,6 +466,9 @@ struct wil_net_stats {
+ 	unsigned long	tx_bytes;
+ 	unsigned long	tx_errors;
+ 	unsigned long	rx_dropped;
++	unsigned long	rx_non_data_frame;
++	unsigned long	rx_short_frame;
++	unsigned long	rx_large_frame;
+ 	u16 last_mcs_rx;
+ };
+

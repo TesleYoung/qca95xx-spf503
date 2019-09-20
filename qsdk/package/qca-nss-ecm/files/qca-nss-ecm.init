@@ -1,0 +1,144 @@
+#!/bin/sh  /etc/rc.common
+#
+# Copyright (c) 2014-2016 The Linux Foundation. All rights reserved.
+#
+# The shebang above has an extra space intentially to avoid having
+# openwrt build scripts automatically enable this package starting
+# at boot.
+
+START=70
+
+CONF_FILE=/etc/sysctl.d/qca-nss-ecm.conf
+
+EXTRA_COMMANDS="enable_ecm disable_ecm"
+EXTRA_HELP=<<EOF
+        enable_ecm  Enables the ECM's frontend functionality
+        disable_ecm Disables the ECM's frontend functionality
+EOF
+
+get_front_end_mode() {
+	config_load "ecm"
+	config_get front_end global acceleration_engine "auto"
+
+	case $front_end in
+	auto)
+		echo '0'
+		;;
+	nss)
+		echo '1'
+		;;
+	sfe)
+		echo '2'
+		;;
+	*)
+		echo 'uci_option_acceleration_engine is invalid'
+	esac
+}
+
+support_bridge() {
+	#NSS support bridge acceleration
+	[ -d /sys/kernel/debug/ecm/ecm_nss_ipv4 ] && return 0
+	#SFE doesn't support bridge acceleration
+	[ -d /sys/kernel/debug/ecm/ecm_sfe_ipv4 ] && return 1
+}
+
+defunct_ecm() {
+	echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+	sleep 1;
+}
+
+stop_ecm() {
+	#
+	# Stop ECM frontends
+	#
+	echo 1 > /sys/kernel/debug/ecm/front_end_ipv4_stop
+	echo 1 > /sys/kernel/debug/ecm/front_end_ipv6_stop
+}
+
+enable_ecm() {
+	#
+	# Start ECM frontends
+	#
+	echo 0 > /sys/kernel/debug/ecm/front_end_ipv4_stop
+	echo 0 > /sys/kernel/debug/ecm/front_end_ipv6_stop
+}
+
+disable_ecm() {
+	#
+	# Gracefully stop the ECM and defunct the connections.
+	#
+	stop_ecm
+	defunct_ecm
+}
+
+load_sfe() {
+	[ -d /sys/module/shortcut_fe ] || insmod shortcut-fe
+	[ -d /sys/module/shortcut_fe_ipv6 ] || insmod shortcut-fe-ipv6
+	[ -d /sys/module/shortcut_fe_drv ] || insmod shortcut-fe-drv
+}
+
+load_ecm() {
+	#
+	# If ECM is already loaded, make sure its frontends are enabled
+	# and functional. Otherwise load it.
+	#
+	if [ -d /sys/module/ecm ]; then
+		enable_ecm
+	else
+		load_sfe
+		insmod ecm front_end_selection=$(get_front_end_mode)
+	fi
+
+	support_bridge && {
+		sysctl -w net.bridge.bridge-nf-call-ip6tables=1
+		sysctl -w net.bridge.bridge-nf-call-iptables=1
+	}
+}
+
+unload_ecm() {
+	#
+	# Based on the underlying acceleration engine, gracefully
+	# stop the ECM and unload the module.
+	#
+	if [ -d /sys/module/ecm ]; then
+		disable_ecm
+		rmmod ecm
+		sleep 1
+	fi
+
+	sysctl -w net.bridge.bridge-nf-call-ip6tables=0
+	sysctl -w net.bridge.bridge-nf-call-iptables=0
+}
+
+setopt() {
+	local name=$1
+	local val=$2
+
+	grep -q "^${name}" ${CONF_FILE} && \
+		sed -i "s,^${name}.*,${name}=${val}," ${CONF_FILE} || \
+		echo "${name}=${val}" >> ${CONF_FILE}
+}
+
+delopt() {
+	local name=$1
+
+	sed -i "/^${name}/d" ${CONF_FILE}
+}
+
+start() {
+	load_ecm
+
+	setopt dev.nss.general.redirect 1
+	support_bridge && {
+		setopt net.bridge.bridge-nf-call-ip6tables 1
+		setopt net.bridge.bridge-nf-call-iptables 1
+	}
+}
+
+stop() {
+	unload_ecm
+
+	delopt dev.nss.general.redirect
+	delopt net.bridge.bridge-nf-call-ip6tables
+	delopt net.bridge.bridge-nf-call-iptables
+}

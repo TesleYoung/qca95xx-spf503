@@ -1,0 +1,50 @@
+--- a/drivers/net/wireless/ath/wil6210/interrupt.c
++++ b/drivers/net/wireless/ath/wil6210/interrupt.c
+@@ -342,6 +342,10 @@ static void wil_cache_mbox_regs(struct wil6210_priv *wil)
+ 	wil_mbox_ring_le2cpus(&wil->mbox_ctl.tx);
+ }
+ 
++/* target operations */
++/* register read */
++#define R(a) ioread32(wil->csr + HOSTADDR(a))
++
+ static irqreturn_t wil6210_irq_misc(int irq, void *cookie)
+ {
+ 	struct wil6210_priv *wil = cookie;
+@@ -360,7 +364,12 @@ static irqreturn_t wil6210_irq_misc(int irq, void *cookie)
+ 	wil6210_mask_irq_misc(wil);
+ 
+ 	if (isr & ISR_MISC_FW_ERROR) {
+-		wil_err(wil, "Firmware error detected\n");
++		u32 fw_assert_code = R(RGF_FW_ASSERT_CODE);
++		u32 ucode_assert_code = R(RGF_UCODE_ASSERT_CODE);
++
++		wil_err(wil,
++			"Firmware error detected, assert codes FW 0x%08x, UCODE 0x%08x\n",
++			fw_assert_code, ucode_assert_code);
+ 		clear_bit(wil_status_fwready, wil->status);
+ 		/*
+ 		 * do not clear @isr here - we do 2-nd part in thread
+@@ -390,6 +399,8 @@ static irqreturn_t wil6210_irq_misc(int irq, void *cookie)
+ 	}
+ }
+ 
++#undef R
++
+ static irqreturn_t wil6210_irq_misc_thread(int irq, void *cookie)
+ {
+ 	struct wil6210_priv *wil = cookie;
+--- a/drivers/net/wireless/ath/wil6210/wil6210.h
++++ b/drivers/net/wireless/ath/wil6210/wil6210.h
+@@ -246,6 +246,10 @@ struct RGF_ICR {
+ #define RGF_USER_JTAG_DEV_ID	(0x880b34) /* device ID */
+ 	#define JTAG_DEV_ID_SPARROW_B0	(0x2632072f)
+ 
++/* crash codes for FW/Ucode stored here */
++#define RGF_FW_ASSERT_CODE		(0x91f020)
++#define RGF_UCODE_ASSERT_CODE		(0x91f028)
++
+ enum {
+ 	HW_VER_UNKNOWN,
+ 	HW_VER_SPARROW_B0, /* JTAG_DEV_ID_SPARROW_B0 */
+

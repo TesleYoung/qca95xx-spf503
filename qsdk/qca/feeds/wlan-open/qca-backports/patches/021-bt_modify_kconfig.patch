@@ -1,0 +1,10 @@
+--- a/Kconfig.package.hacks
++++ b/Kconfig.package.hacks
+@@ -6,3 +6,7 @@
+ 	def_bool y
+ config EXPERT
+ 	def_bool y
++config BT
++	default m
++config TTY
++	def_bool y

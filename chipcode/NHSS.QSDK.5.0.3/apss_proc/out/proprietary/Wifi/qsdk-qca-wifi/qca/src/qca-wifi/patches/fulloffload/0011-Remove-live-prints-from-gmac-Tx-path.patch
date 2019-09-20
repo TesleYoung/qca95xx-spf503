@@ -1,0 +1,42 @@
+From 00285d5b0df6daf8eae8c9cfc2f895117e01106b Mon Sep 17 00:00:00 2001
+From: Balaganapathy Palanisami <bpalanis@qti.qualcomm.com>
+Date: Mon, 11 Sep 2017 17:18:31 +0530
+Subject: [PATCH] Remove live prints from gmac Tx path.
+
+Removed GMAC live printk from Tx path.
+
+Signed-off-by: Balaganapathy Palanisami <bpalanis@qti.qualcomm.com>
+---
+ host/hif/gmac/hif_gmac.c         | 2 +-
+ target/linux/hif/gmac/hif_gmac.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/host/hif/gmac/hif_gmac.c b/host/hif/gmac/hif_gmac.c
+index 35b52ff..e6e7f2a 100755
+--- a/host/hif/gmac/hif_gmac.c
++++ b/host/hif/gmac/hif_gmac.c
+@@ -611,7 +611,7 @@ hif_send(hif_handle_t hif_handle ,a_uint32_t pipeid , struct sk_buff * skb )
+     }
+ 
+     if(gmac_send_pkt(node,skb)){
+-        printk("GMAC send pkt fail \n");
++        gmac_trc(GMAC_ERROR, ("GMAC send pkt fail \n"));
+     }
+ 
+     gmac_trc(GMAC_FUNCTRACE,("End"));
+diff --git a/target/linux/hif/gmac/hif_gmac.c b/target/linux/hif/gmac/hif_gmac.c
+index e70eb1e..c306bf5 100644
+--- a/target/linux/hif/gmac/hif_gmac.c
++++ b/target/linux/hif/gmac/hif_gmac.c
+@@ -366,7 +366,7 @@ hif_send(hif_handle_t hif_handle ,a_uint32_t pipeid , struct sk_buff * skb )
+     }
+ 
+     if(gmac_send_pkt(node,skb)){
+-        printk("GMAC send pkt fail \n");
++        gmac_trc(GMAC_ERROR, ("GMAC send pkt fail \n"));
+     }
+ 
+     gmac_trc(GMAC_FUNCTRACE,("End"));
+-- 
+1.9.1
+

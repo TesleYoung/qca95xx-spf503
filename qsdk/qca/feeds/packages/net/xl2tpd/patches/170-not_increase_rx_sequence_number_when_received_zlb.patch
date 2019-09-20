@@ -1,0 +1,13 @@
+diff --git a/control.c b/control.c
+index d16f2fc..ad97ebc 100644
+--- a/control.c
++++ b/control.c
+@@ -1706,6 +1706,8 @@ void handle_special (struct buffer *buf, struct call *c, _u16 call)
+             /* If it's a ZLB, we ignore it */
+             if (gconfig.debug_tunnel)
+                 l2tp_log (LOG_DEBUG, "%s: ZLB for closed call\n", __FUNCTION__);
++            t->control_rec_seq_num--;
++            c->cnu = 0;
+             c->cid = 0;
+             return;
+         }

@@ -1,0 +1,13 @@
+--- a/configure.in
++++ b/configure.in
+@@ -23,8 +23,8 @@ AC_MSG_CHECKING([whether $CXX works])
+ AC_TRY_COMPILE([#include <iostream>], 
+                [std::cout << "ok";], 
+                [AC_MSG_RESULT(yes)
+-                LIBFCGIXX=libfcgi++.la
+-                ECHO_CPP=echo-cpp${EXEEXT}
++                LIBFCGIXX=
++                ECHO_CPP=false
+                 AC_MSG_CHECKING([whether cin has a streambuf assignment operator])
+                 AC_TRY_COMPILE([#include <iostream>], 
+                                [cin = static_cast<streambuf *>(0);], 

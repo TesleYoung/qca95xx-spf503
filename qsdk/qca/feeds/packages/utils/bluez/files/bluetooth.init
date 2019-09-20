@@ -1,0 +1,16 @@
+#!/bin/sh /etc/rc.common
+
+
+START=62
+STOP=0
+SERVICE_DAEMONIZE=1
+SERVICE_WRITE_PID=1
+
+start() {
+  service_start /usr/bin/bluetoothd
+}
+
+stop() {
+  service_stop /usr/bin/bluetoothd
+}
+

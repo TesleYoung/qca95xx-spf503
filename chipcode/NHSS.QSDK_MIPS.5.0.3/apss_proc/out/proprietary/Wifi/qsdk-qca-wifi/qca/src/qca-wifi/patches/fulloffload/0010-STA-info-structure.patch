@@ -1,0 +1,56 @@
+From c5792f7be1b687a628d7a163d22b7eb604232f12 Mon Sep 17 00:00:00 2001
+From: Balaganapathy Palanisami <bpalanis@qti.qualcomm.com>
+Date: Tue, 29 Aug 2017 12:57:07 +0530
+Subject: [PATCH] STA info structure.
+
+Fix STA info structure mismatch.
+Signed-off-by: Balaganapathy Palanisami <bpalanis@qti.qualcomm.com>
+---
+ host/thin_driver/atd/atd_cfg.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/host/thin_driver/atd/atd_cfg.c b/host/thin_driver/atd/atd_cfg.c
+index e613b53..6e65d36 100644
+--- a/host/thin_driver/atd/atd_cfg.c
++++ b/host/thin_driver/atd/atd_cfg.c
+@@ -2633,7 +2633,7 @@ atd_cfg_get_stainfo(adf_drv_handle_t hdl, a_uint8_t *buff, a_uint32_t buflen)
+     a_uint32_t       hostlen;
+     a_uint32_t      *pld;
+     void            *resp_buff = NULL;
+-    acfg_stainfo_t  *resp;
++    acfg_sta_info_t  *resp;
+     atd_stainfo_t   *si;
+     a_uint32_t       i, count = 0;
+     u_int8_t        *pos, *end, *next;
+@@ -2670,7 +2670,7 @@ atd_cfg_get_stainfo(adf_drv_handle_t hdl, a_uint8_t *buff, a_uint32_t buflen)
+     hostlen = adf_os_ntohl(*(a_uint32_t *)resp_buff);
+     pos = (a_uint8_t *)resp_buff + sizeof(a_uint32_t);
+     end = (pos + hostlen);
+-    resp = (acfg_stainfo_t *)(buff + sizeof(a_uint32_t));
++    resp = (acfg_sta_info_t *)(buff + sizeof(a_uint32_t));
+     while (pos + sizeof(atd_stainfo_t) <= end) {
+         si = (atd_stainfo_t *)pos;
+ 
+@@ -2706,8 +2706,8 @@ atd_cfg_get_stainfo(adf_drv_handle_t hdl, a_uint8_t *buff, a_uint32_t buflen)
+         resp->isi_opmode = si->isi_opmode;
+         resp->isi_cipher = si->isi_cipher;
+         resp->isi_assoc_time = adf_os_ntohl(si->isi_assoc_time);
+-        resp->isi_tr069_assoc_time_sec = adf_os_ntohl(si->isi_tr069_assoc_time_sec);
+-        resp->isi_tr069_assoc_time_nsec = adf_os_ntohl(si->isi_tr069_assoc_time_nsec);
++        resp->isi_tr069_assoc_time.tv_sec = adf_os_ntohl(si->isi_tr069_assoc_time_sec);
++        resp->isi_tr069_assoc_time.tv_nsec = adf_os_ntohl(si->isi_tr069_assoc_time_nsec);
+         resp->isi_htcap = adf_os_ntohs(si->isi_htcap);
+         resp->isi_rxratekbps = adf_os_ntohl(si->isi_rxratekbps);
+         resp->isi_maxrate_per_client = si->isi_maxrate_per_client;
+@@ -2715,7 +2715,7 @@ atd_cfg_get_stainfo(adf_drv_handle_t hdl, a_uint8_t *buff, a_uint32_t buflen)
+         memcpy(resp + 1, si + 1, adf_os_ntohs(si->isi_len));
+ 
+         count += sizeof(*resp) + adf_os_ntohs(si->isi_len);
+-        resp = (acfg_stainfo_t *)((a_uint8_t *)(resp + 1) +
++        resp = (acfg_sta_info_t *)((a_uint8_t *)(resp + 1) +
+                                   (adf_os_ntohs(si->isi_len)));
+         pos = next;
+     }
+-- 
+1.9.1
+

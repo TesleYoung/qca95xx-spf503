@@ -1,0 +1,23 @@
+--- a/Makefile
++++ b/Makefile
+@@ -68,6 +68,7 @@
+ _TARFILES := Makefile
+ 
+ CURSES := -lncurses
++TINFO := -ltinfo
+ 
+ # This seems about right for the dynamic library stuff.
+ # Something like this is probably needed to make the SE Linux
+@@ -247,10 +248,10 @@
+ 	$(CC) $(ALL_CFLAGS) $^ $(ALL_LDFLAGS) -o $@
+ 
+ slabtop top: % : %.o $(LIBPROC)
+-	$(CC) $(ALL_CFLAGS) $^ $(ALL_LDFLAGS) -o $@ $(CURSES)
++	$(CC) $(ALL_CFLAGS) $^ $(ALL_LDFLAGS) -o $@ $(CURSES) $(TINFO)
+ 
+ watch: % : %.o
+-	$(CC) $(ALL_CFLAGS) $^ $(ALL_LDFLAGS) -o $@ $(CURSES)
++	$(CC) $(ALL_CFLAGS) $^ $(ALL_LDFLAGS) -o $@ $(CURSES) $(TINFO)
+ 
+ ############ progX --> progY
+ 

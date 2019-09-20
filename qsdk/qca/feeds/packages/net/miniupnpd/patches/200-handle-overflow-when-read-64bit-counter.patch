@@ -1,0 +1,26 @@
+diff -uNr a/linux/getifstats.c b/linux/getifstats.c
+--- a/linux/getifstats.c	2012-04-07 01:47:58.000000000 +0800
++++ b/linux/getifstats.c	2013-11-08 16:45:50.853229571 +0800
+@@ -70,18 +70,18 @@
+ 			continue;
+ 		p++;
+ 		while(*p==' ') p++;
+-		data->ibytes = strtoul(p, &p, 0);
++		data->ibytes = strtoull(p, &p, 0);
+ 		while(*p==' ') p++;
+-		data->ipackets = strtoul(p, &p, 0);
++		data->ipackets = strtoull(p, &p, 0);
+ 		/* skip 6 columns */
+ 		for(i=6; i>0 && *p!='\0'; i--) {
+ 			while(*p==' ') p++;
+ 			while(*p!=' ' && *p) p++;
+ 		}
+ 		while(*p==' ') p++;
+-		data->obytes = strtoul(p, &p, 0);
++		data->obytes = strtoull(p, &p, 0);
+ 		while(*p==' ') p++;
+-		data->opackets = strtoul(p, &p, 0);
++		data->opackets = strtoull(p, &p, 0);
+ 		r = 0;
+ 		break;
+ 	}

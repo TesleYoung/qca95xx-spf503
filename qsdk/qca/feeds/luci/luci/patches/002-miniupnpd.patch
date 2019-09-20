@@ -1,0 +1,42 @@
+--- a/applications/luci-upnp/luasrc/model/cbi/upnp/upnp.lua
++++ b/applications/luci-upnp/luasrc/model/cbi/upnp/upnp.lua
+@@ -4,6 +4,9 @@ LuCI - Lua Configuration Interface
+ Copyright 2008 Steven Barth <steven@midlink.org>
+ Copyright 2008-2011 Jo-Philipp Wich <xm@subsignal.org>
+ 
++Copyright (c) 2013 The Linux Foundation. All rights reserved.
++Not a Contribution.
++
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+@@ -40,14 +43,22 @@ function e.write(self, section, value)
+ 	end
+ end
+ 
+-s:taboption("general", Flag, "enable_upnp", translate("Enable UPnP functionality")).default = "1"
+-s:taboption("general", Flag, "enable_natpmp", translate("Enable NAT-PMP functionality")).default = "1"
+-
+-s:taboption("general", Flag, "secure_mode", translate("Enable secure mode"),
+-	translate("Allow adding forwards only to requesting ip addresses")).default = "1"
++ni = s:taboption("general", Flag, "enable_upnp", translate("Enable UPnP functionality"))
++ni.default = "1"
++ni.rmempty = false
++
++ni = s:taboption("general", Flag, "enable_natpmp", translate("Enable NAT-PMP functionality"))
++ni.default = "1"
++ni.rmempty = false
++
++ni = s:taboption("general", Flag, "secure_mode", translate("Enable secure mode"),
++	translate("Allow adding forwards only to requesting ip addresses"))
++ni.default = "1"
++ni.rmempty = false
+ 
+-s:taboption("general", Flag, "log_output", translate("Enable additional logging"),
++ni = s:taboption("general", Flag, "log_output", translate("Enable additional logging"),
+ 	translate("Puts extra debugging information into the system log"))
++ni.rmempty = false
+ 
+ s:taboption("general", Value, "download", translate("Downlink"),
+ 	translate("Value in KByte/s, informational only")).rmempty = true
+

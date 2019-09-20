@@ -1,0 +1,115 @@
+diff --git a/src/ap/ieee802_11.c b/src/ap/ieee802_11.c
+index 4374e59..2f3b666 100644
+--- a/src/ap/ieee802_11.c
++++ b/src/ap/ieee802_11.c
+@@ -1150,6 +1150,14 @@ void handle_auth_fils(struct hostapd_data *hapd, struct sta_info *sta,
+ 			wpa_printf(MSG_DEBUG,
+ 				   "FILS: Will send Authentication frame once the response from authentication server is available");
+ 			sta->flags |= WLAN_STA_PENDING_FILS_ERP;
++			/* Calculate pending PMKID here so that we do not need
++			 * to maintain a copy of the EAP-Initiate/Reauth
++			 * message. */
++			if (fils_pmkid_erp(wpa_auth_sta_key_mgmt(sta->wpa_sm),
++					   elems.fils_wrapped_data,
++					   elems.fils_wrapped_data_len,
++					   sta->fils_erp_pmkid) == 0)
++				sta->fils_erp_pmkid_set = 1;
+ 			return;
+ #else /* CONFIG_NO_RADIUS */
+ 			resp = WLAN_STATUS_UNSPECIFIED_FAILURE;
+@@ -1260,6 +1268,24 @@ struct wpabuf *prepare_auth_resp_fils(struct hostapd_data *hapd,
+ 			goto fail;
+ 		}
+ 		pmk = pmk_buf;
++
++		if (sta->fils_erp_pmkid_set) {
++			/* TODO: get PMKLifetime from WPA parameters */
++			unsigned int dot11RSNAConfigPMKLifetime = 43200;
++
++			sta->fils_erp_pmkid_set = 0;
++			if (wpa_auth_pmksa_add2(
++				    hapd->wpa_auth, sta->addr,
++				    pmk, pmk_len,
++				    sta->fils_erp_pmkid,
++				    sta->session_timeout_set ?
++				    sta->session_timeout :
++				    dot11RSNAConfigPMKLifetime,
++				    wpa_auth_sta_key_mgmt(sta->wpa_sm)) < 0) {
++				wpa_printf(MSG_ERROR,
++					   "FILS: Failed to add PMKSA cache entry based on ERP");
++			}
++		}
+ 	} else if (pmksa) {
+ 		pmk = pmksa->pmk;
+ 		pmk_len = pmksa->pmk_len;
+diff --git a/src/ap/sta_info.h b/src/ap/sta_info.h
+index 60d30b3..f43ebd7 100644
+--- a/src/ap/sta_info.h
++++ b/src/ap/sta_info.h
+@@ -12,11 +12,11 @@
+ #ifdef CONFIG_MESH
+ /* needed for mesh_plink_state enum */
+ #include "common/defs.h"
+-#include "common/wpa_common.h"
+ #endif /* CONFIG_MESH */
+ 
+ #include "list.h"
+ #include "vlan.h"
++#include "common/wpa_common.h"
+ #include "common/ieee802_11_defs.h"
+ 
+ /* STA flags */
+@@ -226,10 +226,12 @@ struct sta_info {
+ #ifdef CONFIG_FILS
+ 	u8 fils_snonce[FILS_NONCE_LEN];
+ 	u8 fils_session[FILS_SESSION_LEN];
++	u8 fils_erp_pmkid[PMKID_LEN];
+ 	u8 *fils_pending_assoc_req;
+ 	size_t fils_pending_assoc_req_len;
+ 	unsigned int fils_pending_assoc_is_reassoc:1;
+ 	unsigned int fils_dhcp_rapid_commit_proxy:1;
++	unsigned int fils_erp_pmkid_set:1;
+ 	struct wpabuf *fils_hlp_resp;
+ 	struct wpabuf *hlp_dhcp_discover;
+ 	u8 fils_pending_auth_transaction;
+diff --git a/src/ap/wpa_auth.c b/src/ap/wpa_auth.c
+index cca426d..914a0ed 100644
+--- a/src/ap/wpa_auth.c
++++ b/src/ap/wpa_auth.c
+@@ -3948,6 +3948,22 @@ int wpa_auth_pmksa_add_sae(struct wpa_authenticator *wpa_auth, const u8 *addr,
+ }
+ 
+ 
++int wpa_auth_pmksa_add2(struct wpa_authenticator *wpa_auth, const u8 *addr,
++           const u8 *pmk, size_t pmk_len, const u8 *pmkid,
++           int session_timeout, int akmp)
++{
++   if (wpa_auth->conf.disable_pmksa_caching)
++       return -1;
++
++   if (pmksa_cache_auth_add(wpa_auth->pmksa, pmk, pmk_len, pmkid,
++                NULL, 0, wpa_auth->addr, addr, session_timeout,
++                NULL, akmp))
++       return 0;
++
++   return -1;
++}
++
++
+ void wpa_auth_pmksa_remove(struct wpa_authenticator *wpa_auth,
+ 			   const u8 *sta_addr)
+ {
+diff --git a/src/ap/wpa_auth.h b/src/ap/wpa_auth.h
+index 94ba94b..4415fa5 100644
+--- a/src/ap/wpa_auth.h
++++ b/src/ap/wpa_auth.h
+@@ -302,6 +302,9 @@ int wpa_auth_pmksa_add_preauth(struct wpa_authenticator *wpa_auth,
+ 			       struct eapol_state_machine *eapol);
+ int wpa_auth_pmksa_add_sae(struct wpa_authenticator *wpa_auth, const u8 *addr,
+ 			   const u8 *pmk, const u8 *pmkid);
++int wpa_auth_pmksa_add2(struct wpa_authenticator *wpa_auth, const u8 *addr,
++           const u8 *pmk, size_t pmk_len, const u8 *pmkid,
++           int session_timeout, int akmp);
+ void wpa_auth_pmksa_remove(struct wpa_authenticator *wpa_auth,
+ 			   const u8 *sta_addr);
+ int wpa_auth_pmksa_list(struct wpa_authenticator *wpa_auth, char *buf,

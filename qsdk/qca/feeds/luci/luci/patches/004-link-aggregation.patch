@@ -1,0 +1,157 @@
+diff -uNr a/libs/core/luasrc/model/network.lua b/libs/core/luasrc/model/network.lua
+--- a/libs/core/luasrc/model/network.lua	2013-01-18 22:08:37.000000000 +0800
++++ b/libs/core/luasrc/model/network.lua	2013-05-22 15:28:06.000000000 +0800
+@@ -758,6 +758,10 @@
+ 	return self:_get("type")
+ end
+ 
++function protocol.mode(self)
++	return self:_get("mode")
++end
++
+ function protocol.name(self)
+ 	return self.sid
+ end
+@@ -841,6 +845,10 @@
+ 	return (not self:is_virtual() and self:type() == "bridge")
+ end
+ 
++function protocol.is_bonding(self)
++	return (not self:is_virtual() and self:type() == "bonding")
++end
++
+ function protocol.opkg_package(self)
+ 	return nil
+ end
+@@ -897,6 +905,27 @@
+ 	end
+ end
+ 
++function protocol.add_slaves(self, ifname)
++	ifname = _M:ifnameof(ifname)
++	if ifname and not self:is_floating() then
++		-- remove the interface from all ifaces
++		_uci_real:foreach("network", "interface",
++			function(s)
++				_filter("network", s['.name'], "slaves", ifname)
++			end)
++
++		-- if its a wifi interface, change its network option
++		local wif = _wifi_lookup(ifname)
++		if wif then
++			_uci_real:set("wireless", wif, "network", self.sid)
++
++		-- add iface to our iface list
++		else
++			_append("network", self.sid, "slaves", ifname)
++		end
++	end
++end
++
+ function protocol.del_interface(self, ifname)
+ 	ifname = _M:ifnameof(ifname)
+ 	if ifname and not self:is_floating() then
+diff -uNr a/modules/admin-full/luasrc/model/cbi/admin_network/iface_add.lua b/modules/admin-full/luasrc/model/cbi/admin_network/iface_add.lua
+--- a/modules/admin-full/luasrc/model/cbi/admin_network/iface_add.lua	2013-01-28 02:43:41.000000000 +0800
++++ b/modules/admin-full/luasrc/model/cbi/admin_network/iface_add.lua	2013-05-22 17:35:25.057225533 +0800
+@@ -33,8 +33,16 @@
+ 
+ newproto = m:field(ListValue, "_netproto", translate("Protocol of the new interface"))
+ 
+-netbridge = m:field(Flag, "_bridge", translate("Create a bridge over multiple interfaces"))
++netbridge = m:field(Flag, "_bridge", translate("Create a bridge or a bonding over multiple interfaces"))
+ 
++devtype = m:field(ListValue, "_devtype", translate("Interface type to use for this network"))
++
++devtype:value("bridge", "Bridge")
++devtype:value("bonding", "Bonding")
++devtype:depends({_bridge = "1"})
++
++bondingifname = m:field(Value, "_bondingifname", translate("Name of bonding interface, example : bond0"))
++bondingifname:depends({_bridge = "1", _devtype = "bonding"})
+ 
+ sifname = m:field(Value, "_ifname", translate("Cover the following interface"))
+ 
+@@ -70,6 +78,14 @@
+ 		newnet:add_error(section, translate("The given network name is not unique"))
+ 	end
+ 
++	if (netbridge:formvalue(section) == "1") and (devtype:formvalue(section) == "bonding") then
++		local bondname = bondingifname:formvalue(section)
++		if not bondname or #bondname == 0 then
++			bondingifname:add_error(section, translate("No bonding interface name specified"))
++			return nil 
++		end
++	end
++
+ 	local proto = nw:get_protocol(value)
+ 	if proto and not proto:is_floating() then
+ 		local br = (netbridge:formvalue(section) == "1")
+@@ -85,14 +101,22 @@
+ function newproto.write(self, section, value)
+ 	local name = newnet:formvalue(section)
+ 	if name and #name > 0 then
+-		local br = (netbridge:formvalue(section) == "1") and "bridge" or nil
++		local br = (netbridge:formvalue(section) == "1") and devtype:formvalue(section) or nil
+ 		local net = nw:add_network(name, { proto = value, type = br })
+ 		if net then
+ 			local ifn
+ 			for ifn in utl.imatch(
+ 				br and mifname:formvalue(section) or sifname:formvalue(section)
+ 			) do
+-				net:add_interface(ifn)
++				if br == "bonding" then
++					net:add_slaves(ifn)
++				else
++					net:add_interface(ifn)
++				end
++			end
++			if br == "bonding" then
++				local bondname = bondingifname:formvalue(section)
++				net:add_interface(bondname)
+ 			end
+ 			nw:save("network")
+ 			nw:save("wireless")
+diff -uNr a/modules/admin-full/luasrc/model/cbi/admin_network/ifaces.lua b/modules/admin-full/luasrc/model/cbi/admin_network/ifaces.lua
+--- a/modules/admin-full/luasrc/model/cbi/admin_network/ifaces.lua	2012-08-17 16:24:24.000000000 +0800
++++ b/modules/admin-full/luasrc/model/cbi/admin_network/ifaces.lua	2013-05-22 15:33:57.000000000 +0800
+@@ -227,8 +227,20 @@
+ auto = s:taboption("advanced", Flag, "auto", translate("Bring up on boot"))
+ auto.default = (net:proto() == "none") and auto.disabled or auto.enabled
+ 
++if not net:is_virtual() and net:is_bonding() then
++	bondingmode = s:taboption("physical", ListValue, "mode",
++			translate("Select the Link Aggregation mode used for network interface bonding"))
++	bondingmode:value("0", "Round-robin")
++	bondingmode:value("1", "Active-backup")
++	bondingmode:value("2", "XOR")
++	bondingmode:value("3", "Broadcast")
++	bondingmode:value("4", "IEEE 802.3 and Dynamic link aggregation")
++	bondingmode:value("5", "Adaptive transmit load balancing")
++	bondingmode:value("6", "Adaptive load balancing")
++	p.default = net:mode()
++end
+ 
+-if not net:is_virtual() then
++if not net:is_virtual() and not net:is_bonding() then
+ 	br = s:taboption("physical", Flag, "type", translate("Bridge interfaces"), translate("creates a bridge over specified interface(s)"))
+ 	br.enabled = "bridge"
+ 	br.rmempty = true
+@@ -243,7 +255,7 @@
+ end
+ 
+ 
+-if not net:is_floating() then
++if not net:is_floating() and not net:is_bonding() then
+ 	ifname_single = s:taboption("physical", Value, "ifname_single", translate("Interface"))
+ 	ifname_single.template = "cbi/network_ifacelist"
+ 	ifname_single.widget = "radio"
+@@ -294,7 +306,7 @@
+ end
+ 
+ 
+-if not net:is_virtual() then
++if not net:is_virtual() and not net:is_bonding() then
+ 	ifname_multi = s:taboption("physical", Value, "ifname_multi", translate("Interface"))
+ 	ifname_multi.template = "cbi/network_ifacelist"
+ 	ifname_multi.nobridges = true

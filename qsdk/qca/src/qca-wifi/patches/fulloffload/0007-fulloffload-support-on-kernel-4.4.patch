@@ -1,0 +1,90 @@
+From 095c9887f3d3009aee9a24bfd3583271f4cc5632 Mon Sep 17 00:00:00 2001
+From: xiaofeis <xiaofeis@qti.qualcomm.com>
+Date: Wed, 5 Apr 2017 15:16:15 +0800
+Subject: [PATCH] fulloffload support on kernel-4.4
+
+Change-Id: I4ab76125cc2bf279b0bc900d465aceab2f01cf1e
+Signed-off-by: xiaofeis <xiaofeis@qti.qualcomm.com>
+---
+ host/hif/gmac/hif_gmac.c | 53 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 53 insertions(+)
+
+diff --git a/host/hif/gmac/hif_gmac.c b/host/hif/gmac/hif_gmac.c
+index 82a5980..35b52ff 100755
+--- a/host/hif/gmac/hif_gmac.c
++++ b/host/hif/gmac/hif_gmac.c
+@@ -1,4 +1,9 @@
+ /*
++ * Copyright (c) 2017 Qualcomm Innovation Center, Inc.
++ *
++ * All Rights Reserved.
++ * Confidential and Proprietary - Qualcomm Innovation Center, Inc.
++ *
+  * Copyright (c) 2008-2010, Atheros Communications Inc.
+  *
+  * Permission to use, copy, modify, and/or distribute this software for any
+@@ -1001,6 +1006,8 @@ struct ag71xx_mdio {
+     void __iomem *mdio_base;
+ };
+ 
++
++#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,14,0))
+ extern struct bus_type platform_bus_type;
+ 
+ struct mii_bus *
+@@ -1028,6 +1035,52 @@ gmac_mii_get(int unit)
+ 
+     return miibus;
+ }
++#else
++
++#if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
++#include <linux/of.h>
++#include <linux/of_device.h>
++
++struct mii_bus *
++gmac_mii_get(int unit)
++{
++	struct ag71xx_mdio *am;
++	struct device_node *mdio_node = NULL;
++	struct platform_device *mdio_plat = NULL;
++	struct mii_bus *miibus = NULL;
++
++	mdio_node = of_find_compatible_node(NULL, NULL, "qca,ag71xx-mdio");
++	if (!mdio_node) {
++		printk("No MDIO node found in DTS!\n");
++		return NULL;
++	}
++
++	mdio_plat = of_find_device_by_node(mdio_node);
++	if (!mdio_plat) {
++		printk("cannot find platform device from mdio node\n");
++		return NULL;
++	}
++
++	am = dev_get_drvdata(&mdio_plat->dev);
++	if (!am) {
++		printk("cannot get mdio_data reference from device data\n");
++		return NULL;
++	}
++
++	miibus = am->mii_bus;
++	if (!miibus) {
++		printk("cannot get mii bus reference from device data\n");
++		return NULL;
++	}
++
++	return miibus;
++}
++#else
++#error "Not support MDIO access in hif_gmac"
++#endif
++
++#endif
++
+ EXPORT_SYMBOL(gmac_mii_get);
+ #endif
+ 
+-- 
+1.9.1
+

@@ -1,0 +1,65 @@
+From f58f907af0c58312321afbca53f781e1a297c3c7 Mon Sep 17 00:00:00 2001
+From: Venkata Krishna Sundararajan <vsundara@qti.qualcomm.com>
+Date: Wed, 2 Aug 2017 17:56:40 +0530
+Subject: [PATCH 2/2] strlcpy adf fixes
+
+---
+ adf/include/os/adf_os_mem.h   | 4 ++--
+ adf/net/linux/adf_net_wext.c  | 4 ++--
+ adf/os/linux/adf_os_mem_pvt.h | 2 +-
+ 3 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/adf/include/os/adf_os_mem.h b/adf/include/os/adf_os_mem.h
+index 9e6b4dd..afeb634 100644
+--- a/adf/include/os/adf_os_mem.h
++++ b/adf/include/os/adf_os_mem.h
+@@ -165,9 +165,9 @@ adf_os_str_cmp(const char *str1, const char *str2)
+  * @return    0     returns the initial value of dest
+  */
+ static inline char *
+-adf_os_str_ncopy(char *dest, const char *src, a_uint32_t bytes)
++adf_os_str_lcopy(char *dest, const char *src, a_uint32_t bytes)
+ {
+-    return __adf_os_str_ncopy(dest, src, bytes);
++    return __adf_os_str_lcopy(dest, src, bytes);
+ }
+ 
+ /**
+diff --git a/adf/net/linux/adf_net_wext.c b/adf/net/linux/adf_net_wext.c
+index ee492e9..ce9d512 100644
+--- a/adf/net/linux/adf_net_wext.c
++++ b/adf/net/linux/adf_net_wext.c
+@@ -937,7 +937,7 @@ __wext_get_ssid(struct net_device *dev, struct iw_request_info *info,
+                                            (acfg_data_t *)&ssid);
+ 
+     iwreq->essid.length = ssid.len ;
+-    adf_os_str_ncopy(extra ,ssid.ssid ,ssid.len) ;
++    adf_os_str_lcopy(extra ,ssid.ssid ,sizeof(ssid.ssid)) ;
+     iwreq->essid.flags = 1 ; /* active */
+ 
+     return __a_status_to_os(status);
+@@ -1091,7 +1091,7 @@ __wext_get_wireless_name(struct net_device *dev, struct iw_request_info *info,
+     status = __wioctl_sw[ACFG_REQ_GET_NAME](netdev_to_softc(dev),
+                                     (acfg_data_t *)wname);
+ 
+-    adf_os_str_ncopy(iwreq->name ,wname  ,ACFG_MAX_IFNAME);
++    adf_os_str_lcopy(iwreq->name ,wname  ,ACFG_MAX_IFNAME);
+ 
+     return __a_status_to_os(status);
+ }
+diff --git a/adf/os/linux/adf_os_mem_pvt.h b/adf/os/linux/adf_os_mem_pvt.h
+index 21ff6a8..bb73c97 100644
+--- a/adf/os/linux/adf_os_mem_pvt.h
++++ b/adf/os/linux/adf_os_mem_pvt.h
+@@ -202,7 +202,7 @@ __adf_os_str_cmp(const char *str1, const char *str2)
+  * @retval    0     returns the initial value of dest
+  */
+ static inline char *
+-__adf_os_str_ncopy(char *dest, const char *src, a_uint32_t bytes)
++__adf_os_str_lcopy(char *dest, const char *src, a_uint32_t bytes)
+ {   
+     strlcpy(dest, src, bytes);
+     return dest;
+-- 
+1.9.1
+

@@ -1,0 +1,11 @@
+--- a/alsamixer/Makefile.in
++++ b/alsamixer/Makefile.in
+@@ -59,7 +59,7 @@
+ 	proc_files.$(OBJEXT) textbox.$(OBJEXT) utils.$(OBJEXT) \
+ 	volume_mapping.$(OBJEXT) widget.$(OBJEXT)
+ alsamixer_OBJECTS = $(am_alsamixer_OBJECTS)
+-alsamixer_LDADD = $(LDADD)
++alsamixer_LDADD = $(LDADD) -ltinfo
+ alsamixer_DEPENDENCIES =
+ DEFAULT_INCLUDES = -I.@am__isrc@ -I$(top_builddir)/include
+ depcomp = $(SHELL) $(top_srcdir)/depcomp

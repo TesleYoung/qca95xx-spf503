@@ -1,0 +1,49 @@
+From c3de69658006af0e0e3b7746e8646b8b4cdd2860 Mon Sep 17 00:00:00 2001
+From: Sebastien GODARD <sysstat@users.noreply.github.com>
+Date: Sun, 2 Nov 2014 18:02:06 +0100
+Subject: [PATCH 2/2] sadc: Fix possible race condition in signal handler code
+
+Commit 1b52f939 tried to stop sending SIGINT to init process.
+But there may be very small time window between parent ID
+validation and sending kill signal to parent. If sar dies
+during this window (though the chance is very small) we end up
+sending signal to init.
+
+This patch fixes above issue.
+
+Signed-off-by: Vasant Hegde <hegdevasant@linux.vnet.ibm.com>
+Signed-off-by: Sripathi Kodi <sripathik@in.ibm.com>
+Signed-off-by: Sebastien GODARD <sysstat@users.noreply.github.com>
+---
+ sadc.c |   12 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/sadc.c b/sadc.c
+index 4d737d0..0ccc81f 100644
+--- a/sadc.c
++++ b/sadc.c
+@@ -238,8 +233,10 @@ void alarm_handler(int sig)
+  */
+ void int_handler(int sig)
+ {
+-	if (!optz) {
+-		/* sadc hasn't been called by sar */
++	pid_t ppid = getppid();
++
++	if (!optz || (ppid == 1)) {
++		/* sadc hasn't been called by sar or sar process is already dead */
+ 		exit(1);
+ 	}
+ 	
+@@ -243,7 +245,7 @@ void int_handler(int sig)
+ 	 * by sadc, not sar. So send SIGINT to sar so that average stats
+ 	 * can be displayed.
+ 	 */
+-	if (kill(getppid(), SIGINT) < 0) {
++	if (kill(ppid, SIGINT) < 0) {
+ 		exit(1);
+ 	}
+ }
+-- 
+1.7.9.5
+

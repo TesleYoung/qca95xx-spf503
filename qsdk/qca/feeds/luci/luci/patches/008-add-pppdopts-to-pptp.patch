@@ -1,0 +1,9 @@
+--- a/protocols/ppp/luasrc/model/cbi/admin_network/proto_pptp.lua
+--- b/protocols/ppp/luasrc/model/cbi/admin_network/proto_pptp.lua
+@@ -114,3 +114,6 @@
+ mtu = section:taboption("advanced", Value, "mtu", translate("Override MTU"))
+ mtu.placeholder = "1500"
+ mtu.datatype    = "max(1500)"
++
++pppd_options = section:taboption("advanced",DynamicList, "pppd_options", translate("Additonal command line arguments for PPP"))
++pppd_options.cast = 'string'

@@ -1,0 +1,64 @@
+From cf48ef5919c3e34162d1b7f33377b20fe1515e76 Mon Sep 17 00:00:00 2001
+From: Venkata Krishna Sundararajan <vsundara@qti.qualcomm.com>
+Date: Wed, 2 Aug 2017 17:27:40 +0530
+Subject: [PATCH] strlcpy fixes
+
+---
+ host/thin_driver/atd/atd_cfg.c | 11 ++++-------
+ host/thin_driver/atd/atd_dev.c |  3 +--
+ 2 files changed, 5 insertions(+), 9 deletions(-)
+
+diff --git a/host/thin_driver/atd/atd_cfg.c b/host/thin_driver/atd/atd_cfg.c
+index 197b684..f198fec 100644
+--- a/host/thin_driver/atd/atd_cfg.c
++++ b/host/thin_driver/atd/atd_cfg.c
+@@ -618,10 +618,9 @@ atd_cfg_create_vap(adf_drv_handle_t       hdl,
+                 resp.name, adf_os_str_len(resp.name)));
+ 
+     /* save vap name returned by target */
+-    adf_os_str_ncopy((char *)icp_name, resp.name,  adf_os_str_len(resp.name));
+-    icp_name[ adf_os_str_len(resp.name) ] = '\0' ;
++    adf_os_str_lcopy((char *)icp_name, resp.name, ACFG_MAX_IFNAME);
+ 
+-    adf_os_str_ncopy(info.if_name, resp.name, adf_os_str_len(resp.name));
++    adf_os_str_lcopy(info.if_name, resp.name, sizeof(info.if_name));
+     adf_os_mem_copy(info.dev_addr, &resp.vap_bssid[0], ACFG_MACADDR_LEN);
+ 
+     info.header_len = sizeof(atd_tx_hdr_t) +
+@@ -5127,8 +5126,7 @@ atd_event_create_vap(atd_host_wifi_t   *wifi, atd_host_vap_t   *vap_input,
+         info.unit = unit;
+     }
+ 
+-    adf_os_str_ncopy(info.if_name, data->if_name,
+-                     adf_os_str_len(data->if_name));
++    adf_os_str_lcopy(info.if_name, data->if_name, sizeof(info.if_name));
+     adf_os_mem_copy(info.dev_addr, &data->mac_addr[0], ACFG_MACADDR_LEN);
+ 
+     info.header_len = sizeof(atd_tx_hdr_t) +
+@@ -5223,8 +5221,7 @@ atd_event_restore_wifi(atd_host_wifi_t *wifi, atd_host_vap_t *vap,
+               ("wifi_name %s",
+                data->if_name));
+ 
+-    adf_os_str_ncopy(info.if_name, data->if_name,
+-                     adf_os_str_len(data->if_name));
++    adf_os_str_lcopy(info.if_name, data->if_name, sizeof(info.if_name));
+     adf_os_mem_copy(info.dev_addr, &data->mac_addr[0], ACFG_MACADDR_LEN);
+ 
+     info.header_len = sizeof(atd_tx_hdr_t) +
+diff --git a/host/thin_driver/atd/atd_dev.c b/host/thin_driver/atd/atd_dev.c
+index 50631fc..90ded80 100644
+--- a/host/thin_driver/atd/atd_dev.c
++++ b/host/thin_driver/atd/atd_dev.c
+@@ -795,8 +795,7 @@ atd_setup_wifi(atd_host_dev_t * dsc,
+ 
+         atd_trace(ATD_DEBUG_FUNCTRACE, ("Creating netdev ..... %d %s \n", \
+                                                 i, &radiorsp->ifname[i][0]));
+-        adf_os_str_ncopy(info.if_name,&radiorsp->ifname[i][0],
+-                         adf_os_str_len(&radiorsp->ifname[i][0]));
++        adf_os_str_lcopy(info.if_name,&radiorsp->ifname[i][0], sizeof(info.if_name));
+ 
+         adf_os_mem_copy(info.dev_addr, &radiorsp->mac_addr[i],
+                         ACFG_MACADDR_LEN);
+-- 
+1.9.1
+
